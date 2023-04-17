@@ -218,7 +218,7 @@ class RTPTransport:
 
             try:
                 self.logger.debug("sending RTCP report: %s", rtcp)
-                await self.send_rtcp_report(rtcp)
+                self.send_rtcp_report(rtcp)
             except asyncio.CancelledError:
                 break
             except Exception as ex:  # pylint: disable=broad-except
@@ -323,7 +323,13 @@ class RTPTransport:
         """
         raise NotImplementedError
 
-    async def send_rtcp_report(self, rtcp: RTCP):
+    def send_rtp(self, rtp: RTP):
+        """
+        Send an RTP pkt to the server
+        """
+        raise NotImplementedError
+
+    def send_rtcp_report(self, rtcp: RTCP):
         """
         Send an RTCP report back to the server
         """

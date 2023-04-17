@@ -34,11 +34,7 @@ def sanitize_rtsp_url(url: str) -> str:
     ).geturl()
 
 
-class RTSPMediaSession:
-    """
-    RTSP Media Session
-    TODO Refactor to support multiple medias
-    """
+class BaseSession:
 
     def __init__(
         self,
@@ -54,67 +50,9 @@ class RTSPMediaSession:
         self.media_type = media_type
         self.logger = logger or default_logger
 
-        self.is_setup = False
-        self.sdp = None
-        self.server_rtp = None
-        self.server_rtcp = None
-
         self.session_id = None
         self.session_keepalive = 60
         self.session_options: Set[str] = set()
-
-    async def __aenter__(self):
-        """
-        At entrance of env, we expect the stream to be ready for playback
-        """
-        await self.setup()
-        return self
-
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
-        if exc_val and exc_type != asyncio.CancelledError:
-            self.logger.error("exception during session: %s %s", exc_type, exc_val)
-        await self.teardown()
-
-    async def setup(self):
-        """
-        Perform SETUP
-        """
-        # Get supported options
-        resp = await self._send("OPTIONS", url=self.media_url)
-        self.save_options(resp)
-
-        # Get SDP
-        resp = await self._send("DESCRIBE", headers={"Accept": "application/sdp"})
-
-        if "content-base" in resp.headers:
-            self.media_url = resp.headers["content-base"]
-            self.logger.info("using base url: %s", self.media_url)
-
-        self.logger.debug("received SDP:\n%s", resp.content)
-        try:
-            self.sdp = SDP(resp.content)
-        except Exception as ex:
-            self.logger.error("Unable to parse SDP: %r", ex)
-            raise
-        self.logger.debug("parsed SDP:\n%s", json.dumps(self.sdp.content, indent=2))
-
-        setup_url = self.sdp.setup_url(self.media_url, media_type=self.media_type)
-        self.logger.info("setting up using URL: %s", setup_url)
-
-        # --- SETUP <url> RTSP/1.0 ---
-        headers = {}
-        self.transport.on_transport_request(headers)
-        resp = await self.connection.send_request(
-            "SETUP", url=setup_url, headers=headers
-        )
-        self.transport.on_transport_response(resp.headers)
-        self.logger.info("stream correctly setup: %s", resp)
-
-        # Store session ID
-        self.save_session(resp)
-
-        # Warm up transport
-        await self.transport.warmup()
 
     @property
     def stats(self) -> RTCPStats:
@@ -175,13 +113,13 @@ class RTSPMediaSession:
 
         self.logger.info("session closed (no transport)")
 
-    async def _send(self, method, url=None, headers=None):
+    async def _send(self, method, url=None, headers=None, body=None):
         if headers is None:
             headers = {}
         if self.session_id:
             headers["Session"] = self.session_id
         return await self.connection.send_request(
-            method, url or self.media_url, headers
+            method, url or self.media_url, headers, body=body
         )
 
     @staticmethod
@@ -236,6 +174,78 @@ class RTSPMediaSession:
         start = cls.ts_to_clock(since)
         end = cls.ts_to_clock(until) if until else ""
         return f"clock={start}-{end}"
+
+
+class RTSPMediaSession(BaseSession):
+    """
+    RTSP Media Session
+    TODO Refactor to support multiple medias
+    """
+
+    def __init__(
+        self,
+        connection,
+        media_url,
+        transport: RTPTransport,
+        media_type="video",
+        logger=None,
+    ):
+        super().__init__(connection, media_url, transport, media_type, logger)
+
+        self.sdp = None
+
+    async def __aenter__(self):
+        """
+        At entrance of env, we expect the stream to be ready for playback
+        """
+        await self.setup()
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        if exc_val and exc_type != asyncio.CancelledError:
+            self.logger.error("exception during session: %s %s", exc_type, exc_val)
+        await self.teardown()
+
+    async def setup(self):
+        """
+        Perform SETUP
+        """
+        # Get supported options
+        resp = await self._send("OPTIONS", url=self.media_url)
+        self.save_options(resp)
+
+        # Get SDP
+        resp = await self._send("DESCRIBE", headers={"Accept": "application/sdp"})
+
+        if "content-base" in resp.headers:
+            self.media_url = resp.headers["content-base"]
+            self.logger.info("using base url: %s", self.media_url)
+
+        self.logger.debug("received SDP:\n%s", resp.content)
+        try:
+            self.sdp = SDP(resp.content)
+        except Exception as ex:
+            self.logger.error("Unable to parse SDP: %r", ex)
+            raise
+        self.logger.debug("parsed SDP:\n%s", json.dumps(self.sdp.content, indent=2))
+
+        setup_url = self.sdp.setup_url(self.media_url, media_type=self.media_type)
+        self.logger.info("setting up using URL: %s", setup_url)
+
+        # --- SETUP <url> RTSP/1.0 ---
+        headers = {}
+        self.transport.on_transport_request(headers)
+        resp = await self.connection.send_request(
+            "SETUP", url=setup_url, headers=headers
+        )
+        self.transport.on_transport_response(resp.headers)
+        self.logger.info("stream correctly setup: %s", resp)
+
+        # Store session ID
+        self.save_session(resp)
+
+        # Warm up transport
+        await self.transport.warmup()
 
     async def play(
         self,

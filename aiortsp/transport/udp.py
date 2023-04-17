@@ -11,6 +11,7 @@ from aiortsp.rtcp.parser import RTCP
 from aiortsp.rtsp.errors import RTSPError
 
 from .base import RTPTransport
+from ..rtp import RTP
 
 _logger = logging.getLogger("rtp.session")
 
@@ -107,7 +108,7 @@ class RTPSink(DatagramSink):
     """
 
     def datagram_received(self, data, addr):
-        self.receiver.handle_rtp_data(data)
+        self.receiver.handle_rtp(data, addr)
 
 
 class UDPTransport(RTPTransport):
@@ -129,6 +130,7 @@ class UDPTransport(RTPTransport):
         self.server_rtp = None
         self.server_rtcp = None
         self.rtcp_sender = None
+        self.rtp_sender = None
 
     @classmethod
     def get_socket_pair(
@@ -228,6 +230,17 @@ class UDPTransport(RTPTransport):
             self.rtcp_sender = sender
         self.handle_rtcp_data(data)
 
+    def handle_rtp(self, data, sender):
+        """
+        Special case for RTCP: we may not have received any report yet
+        :param data:
+        :param sender:
+        """
+        if self.rtp_sender is None:
+            self.logger.info("received RTP from %s", sender)
+            self.rtp_sender = sender
+        self.handle_rtp_data(data)
+
     def on_transport_request(self, headers: dict):
         rtp_port = self.rtp_sink.local_port
         rtcp_port = self.rtcp_sink.local_port
@@ -288,6 +301,10 @@ class UDPTransport(RTPTransport):
             self.logger.info("sending warmup RTCP uplink traffic")
             self.send_upstream(self.rtcp_sink, self.connection.host, self.server_rtcp)
 
-    async def send_rtcp_report(self, rtcp: RTCP):
+    def send_rtcp_report(self, rtcp: RTCP):
         if self.rtcp_sender:
             self.rtcp_sink.sendto(bytes(rtcp), self.rtcp_sender)
+
+    def send_rtp(self, rtp: RTP):
+        if self.rtp_sender:
+            self.rtp_sink.sendto(bytes(rtp), self.rtp_sender)

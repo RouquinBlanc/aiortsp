@@ -144,7 +144,7 @@ class RTSPEndpoint(ResponseSender, asyncio.Protocol):
         msg += data
 
         self._transport.write(msg)
-        self.logger.debug(">>> sending binary: %s bytes", len(msg))
+        self.logger.log(5, ">>> sending binary: %s bytes", len(msg))
 
 
 class RTSPConnection(RTSPEndpoint):

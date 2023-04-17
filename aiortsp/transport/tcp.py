@@ -8,6 +8,7 @@ from aiortsp.rtsp.errors import RTSPError
 from aiortsp.rtsp.parser import RTSPBinary
 
 from .base import RTPTransport
+from ..rtp import RTP
 
 _logger = logging.getLogger("rtp.session")
 
@@ -83,5 +84,8 @@ class TCPTransport(RTPTransport):
             "rtcp": self.rtcp_idx,
         }, "invalid returned interleaved header"
 
-    async def send_rtcp_report(self, rtcp: RTCP):
+    def send_rtcp_report(self, rtcp: RTCP):
         self.connection.send_binary(self.rtcp_idx, bytes(rtcp))
+
+    def send_rtp(self, rtp: RTP):
+        self.connection.send_binary(self.rtp_idx, bytes(rtp))
